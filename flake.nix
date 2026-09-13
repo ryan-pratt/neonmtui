@@ -8,6 +8,12 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+
+        runtimeLibs = with pkgs; [
+          stdenv.cc.cc.lib
+          zlib
+          glibc
+        ];
       in
       {
         devShells.default = pkgs.mkShell {
@@ -24,7 +30,11 @@
             RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
           };
 
-          buildInputs = [ pkgs.zsh ];
+          NIX_LD = pkgs.lib.fileContents "${pkgs.stdenv.cc}/nix-support/dynamic-linker";
+          NIX_LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath runtimeLibs;
+
+          buildInputs = [ pkgs.zsh ] ++ runtimeLibs;
+
           shellHook = ''
             exec zsh
           '';
