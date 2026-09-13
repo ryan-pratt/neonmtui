@@ -36,7 +36,9 @@
           buildInputs = [ pkgs.zsh ] ++ runtimeLibs;
 
           shellHook = ''
-            exec zsh
+            if [ -z "$DIRENV_IN_ENVRC" ]; then
+              exec zsh
+            fi
           '';
         };
       }
