@@ -1,5 +1,5 @@
 use color_eyre::{Result, eyre::WrapErr};
-use crossterm::event::{Event, EventStream, KeyEvent};
+use crossterm::event::{Event, EventStream, KeyCode, KeyEvent};
 use futures_util::StreamExt;
 use nmrs::{Network, NetworkManager};
 use ratatui::{Frame, Terminal, backend::CrosstermBackend, widgets::Paragraph};
@@ -25,8 +25,12 @@ struct AppState {
 impl AppState {
     fn handle(&mut self, event: AppEvent) {
         match event {
-            AppEvent::Key(_) => {
-                self.is_running = false;
+            AppEvent::Key(key) => {
+                if key.is_press()
+                    && let KeyCode::Char('q') = key.code
+                {
+                    self.is_running = false;
+                }
             }
 
             AppEvent::Wifi(WifiEvent::ConnectionUpdated(con)) => {
