@@ -1,62 +1,14 @@
-use color_eyre::{Result, eyre::WrapErr};
-use crossterm::event::{Event, EventStream, KeyCode, KeyEvent};
+use color_eyre::Result;
+use crossterm::event::{Event, EventStream};
 use futures_util::StreamExt;
-use nmrs::{Network, NetworkManager};
-use ratatui::{Frame, Terminal, backend::CrosstermBackend, widgets::Paragraph};
+use ratatui::{Terminal, backend::CrosstermBackend};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-trait AppStateUpdater {
-    fn update_app_state(self: Box<Self>, app_state: &mut AppState);
-}
-
-enum WifiEvent {
-    NetworkListUpdated(Vec<Network>),
-    ConnectionUpdated(Option<String>),
-}
-
-impl AppStateUpdater for WifiEvent {
-    fn update_app_state(self: Box<Self>, app_state: &mut AppState) {
-        match *self {
-            Self::ConnectionUpdated(con) => {
-                app_state.wifi.connected_ssid = con;
-                app_state.status_text = String::from("WiFi connection updated");
-            }
-
-            Self::NetworkListUpdated(nets) => {
-                app_state.wifi.networks = nets;
-                app_state.status_text = String::from("WiFi available networks updated")
-            }
-        }
-    }
-}
-
-impl AppStateUpdater for KeyEvent {
-    fn update_app_state(self: Box<Self>, app_state: &mut AppState) {
-        if self.is_press()
-            && let KeyCode::Char('q') = self.code
-        {
-            app_state.is_running = false;
-        }
-    }
-}
-
-struct AppState {
-    wifi: WifiState,
-    status_text: String,
-    is_running: bool,
-}
-
-impl AppState {
-    fn handle(&mut self, event: Box<dyn AppStateUpdater>) {
-        event.update_app_state(self);
-    }
-}
-
-struct WifiState {
-    networks: Vec<Network>,
-    connected_ssid: Option<String>,
-}
+use neonmtui::{
+    AppState, AppStateUpdater, WifiEvent, WifiState, get_wifi_connection, get_wifi_networks,
+    ui::render,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -135,51 +87,4 @@ async fn run(
         }
     }
     Ok(())
-}
-
-async fn get_wifi_networks() -> Result<Vec<Network>> {
-    let nm = NetworkManager::new().await?;
-
-    let networks = nm
-        .list_networks(None)
-        .await
-        .wrap_err("Failed to list networks")?;
-
-    Ok(networks)
-}
-
-async fn get_wifi_connection() -> Result<Option<String>> {
-    let nm = NetworkManager::new().await?;
-
-    let connected_ssid = nm.current_ssid().await;
-
-    Ok(connected_ssid)
-}
-
-fn render(frame: &mut Frame, app_state: &AppState) {
-    let wifi_text = app_state
-        .wifi
-        .connected_ssid
-        .clone()
-        .unwrap_or_else(|| String::from("Disconnected"));
-
-    let mut text = format!(
-        "{status}\n{wifi}\n",
-        status = app_state.status_text,
-        wifi = wifi_text
-    );
-
-    for network in &app_state.wifi.networks {
-        let strength = network
-            .strength
-            .map(|s| format!("{}%", s))
-            .unwrap_or_else(|| "N/A".into());
-        text.push_str(&format!(
-            "{ssid} ({strength})\n",
-            ssid = network.ssid,
-            strength = strength
-        ));
-    }
-
-    frame.render_widget(Paragraph::new(text), frame.area());
 }
