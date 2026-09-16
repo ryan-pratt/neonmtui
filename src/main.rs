@@ -6,14 +6,39 @@ use ratatui::{Frame, Terminal, backend::CrosstermBackend, widgets::Paragraph};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-enum AppEvent {
-    Wifi(WifiEvent),
-    Key(KeyEvent),
+trait AppStateUpdater {
+    fn update_app_state(self: Box<Self>, app_state: &mut AppState);
 }
 
 enum WifiEvent {
     NetworkListUpdated(Vec<Network>),
     ConnectionUpdated(Option<String>),
+}
+
+impl AppStateUpdater for WifiEvent {
+    fn update_app_state(self: Box<Self>, app_state: &mut AppState) {
+        match *self {
+            Self::ConnectionUpdated(con) => {
+                app_state.wifi.connected_ssid = con;
+                app_state.status_text = String::from("WiFi connection updated");
+            }
+
+            Self::NetworkListUpdated(nets) => {
+                app_state.wifi.networks = nets;
+                app_state.status_text = String::from("WiFi available networks updated")
+            }
+        }
+    }
+}
+
+impl AppStateUpdater for KeyEvent {
+    fn update_app_state(self: Box<Self>, app_state: &mut AppState) {
+        if self.is_press()
+            && let KeyCode::Char('q') = self.code
+        {
+            app_state.is_running = false;
+        }
+    }
 }
 
 struct AppState {
@@ -23,26 +48,8 @@ struct AppState {
 }
 
 impl AppState {
-    fn handle(&mut self, event: AppEvent) {
-        match event {
-            AppEvent::Key(key) => {
-                if key.is_press()
-                    && let KeyCode::Char('q') = key.code
-                {
-                    self.is_running = false;
-                }
-            }
-
-            AppEvent::Wifi(WifiEvent::ConnectionUpdated(con)) => {
-                self.wifi.connected_ssid = con;
-                self.status_text = String::from("WiFi connection updated");
-            }
-
-            AppEvent::Wifi(WifiEvent::NetworkListUpdated(nets)) => {
-                self.wifi.networks = nets;
-                self.status_text = String::from("WiFi available networks updated")
-            }
-        }
+    fn handle(&mut self, event: Box<dyn AppStateUpdater>) {
+        event.update_app_state(self);
     }
 }
 
@@ -74,7 +81,7 @@ async fn run(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     app_state: &mut AppState,
 ) -> Result<()> {
-    let (tx, mut rx) = mpsc::channel(32);
+    let (tx, mut rx) = mpsc::channel::<Box<dyn AppStateUpdater + Send + Sync>>(32);
     let mut crossterm_events = EventStream::new();
 
     let con_tx = tx.clone();
@@ -82,7 +89,7 @@ async fn run(
         loop {
             let res: Result<()> = async {
                 let connected_ssid = get_wifi_connection().await?;
-                let event = AppEvent::Wifi(WifiEvent::ConnectionUpdated(connected_ssid));
+                let event = Box::new(WifiEvent::ConnectionUpdated(connected_ssid));
                 con_tx.send(event).await?;
                 tokio::time::sleep(Duration::from_secs(1)).await;
                 Ok(())
@@ -100,7 +107,7 @@ async fn run(
         loop {
             let res: Result<()> = async {
                 let networks = get_wifi_networks().await?;
-                let event = AppEvent::Wifi(WifiEvent::NetworkListUpdated(networks));
+                let event = Box::new(WifiEvent::NetworkListUpdated(networks));
                 net_tx.send(event).await?;
                 tokio::time::sleep(Duration::from_secs(1)).await;
                 Ok(())
@@ -118,7 +125,7 @@ async fn run(
         tokio::select! {
             Some(Ok(event)) = crossterm_events.next() => {
                 if let Event::Key(key) = event {
-                    app_state.handle(AppEvent::Key(key));
+                    app_state.handle(Box::new(key));
                 }
             }
 
